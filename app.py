@@ -10,13 +10,26 @@ from datetime import datetime
 st.set_page_config(page_title="Finance Tracker Pro", layout="wide")
 
 # Konfigurasi Google Sheets
-SCOPE = ["https://spreadsheets.google.com/feeds", 'https://www.googleapis.com/auth/spreadsheets',
-         "https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/drive"]
+SCOPE = [
+    "https://spreadsheets.google.com/feeds", 
+    'https://www.googleapis.com/auth/spreadsheets',
+    "https://www.googleapis.com/auth/drive.file", 
+    "https://www.googleapis.com/auth/drive"
+]
 
 def get_google_sheet():
-    creds_dict = json.loads(st.secrets["gcp_service_account"])
+    """Mengambil koneksi Google Sheets menggunakan data dari Streamlit Secrets"""
+    # Mengambil string JSON dari secrets
+    creds_str = st.secrets["gcp_service_account"]
+    
+    # Mengubah string menjadi dictionary
+    creds_dict = json.loads(creds_str)
+    
+    # Menggunakan from_json_keyfile_dict agar tidak error "seekable bit stream"
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
     client = gspread.authorize(creds)
+    
+    # ID Sheet
     sheet = client.open_by_key("1Ig-coNVWo1F-1JsCTalmnp0qLcLiR28-D5yN4fxkduk")
     return sheet
 
@@ -28,6 +41,7 @@ choice = st.sidebar.selectbox("Pilih Menu", menu)
 st.title("💰 Aplikasi Keuangan Pribadi")
 
 try:
+    # Memanggil koneksi
     sheet = get_google_sheet()
     
     # 1. Dashboard
@@ -47,11 +61,20 @@ try:
             
             # Progress Tabungan
             st.markdown("### Progress Tabungan")
-            for _, row in df_tab.iterrows():
-                progress = min(float(row['Jumlah_Saat_Ini']) / float(row['Target_Jumlah']), 1.0)
-                st.write(f"**{row['Nama_Akun']}**")
-                st.progress(progress)
-                st.write(f"Rp {row['Jumlah_Saat_Ini']:,} / Rp {row['Target_Jumlah']:,}")
+            if not df_tab.empty:
+                for _, row in df_tab.iterrows():
+                    # Menghindari pembagian dengan nol
+                    target = float(row['Target_Jumlah']) if row['Target_Jumlah'] else 1
+                    current = float(row['Jumlah_Saat_Ini']) if row['Jumlah_Saat_Ini'] else 0
+                    progress = min(current / target, 1.0)
+                    
+                    st.write(f"**{row['Nama_Akun']}**")
+                    st.progress(progress)
+                    st.write(f"Rp {current:,.0f} / Rp {target:,.0f}")
+            else:
+                st.info("Belum ada data tabungan.")
+        else:
+            st.info("Belum ada data transaksi.")
 
     # 2. Input Transaksi
     elif choice == "➕ Input Transaksi":
@@ -83,9 +106,12 @@ try:
     elif choice == "💰 Monitoring Budget":
         df_trans = pd.DataFrame(sheet.worksheet("Transaksi").get_all_records())
         df_budget = pd.DataFrame(sheet.worksheet("Budget").get_all_records())
-        pengeluaran = df_trans[df_trans['Tipe'] == 'Pengeluaran'].groupby('Kategori')['Nominal'].sum().reset_index()
-        budget_vs_actual = pd.merge(df_budget, pengeluaran, on='Kategori', how='left').fillna(0)
-        st.dataframe(budget_vs_actual, use_container_width=True)
+        if not df_trans.empty and not df_budget.empty:
+            pengeluaran = df_trans[df_trans['Tipe'] == 'Pengeluaran'].groupby('Kategori')['Nominal'].sum().reset_index()
+            budget_vs_actual = pd.merge(df_budget, pengeluaran, on='Kategori', how='left').fillna(0)
+            st.dataframe(budget_vs_actual, use_container_width=True)
+        else:
+            st.info("Data transaksi atau budget belum tersedia.")
 
     # 5. Kewajiban
     elif choice == "📋 Kewajiban":
@@ -93,7 +119,8 @@ try:
         st.dataframe(df_kew, use_container_width=True)
 
 except Exception as e:
-    st.error(f"Error: {e}")
+    st.error(f"Terjadi kesalahan saat memuat data: {e}")
+    st.info("Pastikan 'gcp_service_account' di Secrets sudah benar dan sheet memiliki kolom yang sesuai.")
 
 # Footer
 st.markdown("---")
