@@ -1,0 +1,21 @@
+[theme]
+# Warna utama (untuk tombol, link, dan elemen aktif)
+primaryColor = "#2E86C1" 
+
+# Warna latar belakang utama
+backgroundColor = "#F8F9F9" 
+
+# Warna latar belakang elemen seperti sidebar dan kotak input
+secondaryBackgroundColor = "#FFFFFF" 
+
+# Warna teks utama
+textColor = "#2C3E50" 
+
+# Font yang digunakan
+font = "sans serif"
+
+[server]
+# Memastikan aplikasi tetap responsif
+headless = true
+enableCORS = false
+enableXsrfProtection = false
