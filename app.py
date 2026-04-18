@@ -30,7 +30,7 @@ def get_google_sheet():
         st.error(f"❌ Error: {str(e)}")
         return None
 
-# Definisikan kategori
+# Definisikan kategori dengan mapping tipe
 KATEGORI_MAPPING = {
     # Pemasukan
     'Gaji': 'Pemasukan',
@@ -43,6 +43,7 @@ KATEGORI_MAPPING = {
     'Listrik': 'Pengeluaran',
     'Internet': 'Pengeluaran',
     'Transport': 'Pengeluaran',
+    'Belanja': 'Pengeluaran',
     # Tabungan
     'Liburan': 'Tabungan',
     'Pendidikan': 'Tabungan',
@@ -77,7 +78,7 @@ else:
             df_tab = pd.DataFrame(sheet.worksheet("Tabungan").get_all_records())
             df_kewajiban = pd.DataFrame(sheet.worksheet("Kewajiban").get_all_records())
             
-            # Hitung Total Pemasukan
+            # Hitung Total Pemasukan & Pengeluaran
             if not df_trans.empty:
                 df_trans['Nominal'] = pd.to_numeric(df_trans['Nominal'], errors='coerce')
                 total_pemasukan = df_trans[df_trans['Tipe_Kategori'] == 'Pemasukan']['Nominal'].sum()
@@ -107,24 +108,25 @@ else:
             
             st.markdown("### 💹 Ringkasan Keuangan")
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Pemasukan", f"Rp {total_pemasukan:,.0f}")
-            col2.metric("Pengeluaran", f"Rp {total_pengeluaran:,.0f}")
-            col3.metric("Tabungan", f"Rp {total_tabungan:,.0f}")
+            col1.metric("Pemasukan", f"Rp {total_pemasukan:,.0f}", delta="✅ Masuk")
+            col2.metric("Pengeluaran", f"Rp {total_pengeluaran:,.0f}", delta="❌ Keluar")
+            col3.metric("Tabungan", f"Rp {total_tabungan:,.0f}", delta="💰 Ditabung")
             col4.metric("Saldo Akhir", f"Rp {saldo_akhir:,.0f}")
             
             col1, col2 = st.columns(2)
-            col1.metric("Hutang", f"Rp {total_hutang:,.0f}")
-            col2.metric("Piutang", f"Rp {total_piutang:,.0f}")
+            col1.metric("Hutang", f"Rp {total_hutang:,.0f}", delta="💳 Utang")
+            col2.metric("Piutang", f"Rp {total_piutang:,.0f}", delta="💸 Tagihan")
             
             st.markdown("### 📊 Breakdown Transaksi")
             col1, col2, col3 = st.columns(3)
             
-            # Transaksi Biasa
+            # Transaksi Reguler
             if not df_trans.empty:
                 trans_regular = df_trans[df_trans['Tipe_Kategori'].isin(['Pemasukan', 'Pengeluaran'])]
                 with col1:
                     st.write(f"**Transaksi Reguler:** {len(trans_regular)} item")
-                    st.dataframe(trans_regular[['Kategori', 'Tipe_Kategori', 'Nominal']], use_container_width=True)
+                    if not trans_regular.empty:
+                        st.dataframe(trans_regular[['Kategori', 'Tipe_Kategori', 'Nominal']].head(10), use_container_width=True)
             
             # Tabungan
             if not df_tab.empty:
@@ -144,7 +146,8 @@ else:
                     st.write(f"**Kewajiban:** {len(df_kewajiban)} item")
                     for _, row in df_kewajiban.iterrows():
                         badge = "💳" if row['Tipe'] == 'Hutang' else "💰"
-                        st.write(f"{badge} {row['Nama_Kewajiban']} - Rp {row['Nominal']:,.0f} ({row['Status']})")
+                        st.write(f"{badge} {row['Nama_Kewajiban']}")
+                        st.write(f"Rp {row['Nominal']:,.0f} ({row['Status']})")
 
         # 2. INPUT TRANSAKSI
         elif choice == "➕ Input Transaksi":
@@ -155,18 +158,33 @@ else:
                 
                 # Dropdown Kategori
                 kategori_list = list(KATEGORI_MAPPING.keys())
-                kat = st.selectbox("Kategori", kategori_list)
+                kat = st.selectbox("Kategori", kategori_list, key="kategori_select")
                 
                 # Auto-detect Tipe Kategori
                 tipe_kategori = KATEGORI_MAPPING[kat]
-                st.info(f"📌 Tipe: {tipe_kategori}")
+                
+                # Tampilkan Tipe sebagai INFO (read-only)
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**📌 Tipe Kategori:** {tipe_kategori}")
+                with col2:
+                    if tipe_kategori == 'Pemasukan':
+                        st.success(f"✅ {tipe_kategori}")
+                    elif tipe_kategori == 'Pengeluaran':
+                        st.error(f"❌ {tipe_kategori}")
+                    elif tipe_kategori == 'Tabungan':
+                        st.info(f"💰 {tipe_kategori}")
+                    elif tipe_kategori == 'Hutang':
+                        st.warning(f"💳 {tipe_kategori}")
+                    elif tipe_kategori == 'Piutang':
+                        st.warning(f"💸 {tipe_kategori}")
                 
                 nom = st.number_input("Nominal", step=1000, min_value=0)
                 ket = st.text_area("Keterangan")
                 
                 # Conditional input untuk Hutang & Piutang
-                pemilik_hutang = None
-                pihak_penghutang = None
+                pemilik_hutang = ""
+                pihak_penghutang = ""
                 
                 if tipe_kategori == 'Hutang':
                     pemilik_hutang = st.text_input("Nama Pemilik Hutang/Bank", value="")
@@ -174,39 +192,71 @@ else:
                 if tipe_kategori == 'Piutang':
                     pihak_penghutang = st.text_input("Pihak yang Menghutang", value="")
                 
-                if st.form_submit_button("Simpan"):
-                    # Router berdasarkan Tipe Kategori
-                    if tipe_kategori in ['Pemasukan', 'Pengeluaran']:
-                        # Masuk sheet Transaksi
-                        sheet.worksheet("Transaksi").append_row([str(tgl), kat, tipe_kategori, nom, ket, tipe_kategori])
-                        st.success("✅ Transaksi tersimpan!")
-                    
-                    elif tipe_kategori == 'Tabungan':
-                        # Masuk sheet Transaksi
-                        sheet.worksheet("Transaksi").append_row([str(tgl), kat, 'Pengeluaran', nom, ket, 'Tabungan'])
+                if st.form_submit_button("💾 Simpan Transaksi"):
+                    # Validasi
+                    if nom <= 0:
+                        st.error("❌ Nominal harus lebih dari 0!")
+                    elif tipe_kategori == 'Hutang' and not pemilik_hutang:
+                        st.error("❌ Nama pemilik hutang harus diisi!")
+                    elif tipe_kategori == 'Piutang' and not pihak_penghutang:
+                        st.error("❌ Pihak yang menghutang harus diisi!")
+                    else:
+                        # Router berdasarkan Tipe Kategori
+                        if tipe_kategori in ['Pemasukan', 'Pengeluaran']:
+                            sheet.worksheet("Transaksi").append_row([
+                                str(tgl), 
+                                kat, 
+                                tipe_kategori,
+                                nom, 
+                                ket, 
+                                tipe_kategori
+                            ])
+                            st.success(f"✅ {tipe_kategori} tersimpan!")
                         
-                        # Update sheet Tabungan
-                        df_tab = pd.DataFrame(sheet.worksheet("Tabungan").get_all_records())
-                        for idx, row in df_tab.iterrows():
-                            if row['Nama_Akun'] == kat:
-                                current_amount = float(row['Jumlah_Saat_Ini']) if row['Jumlah_Saat_Ini'] else 0
-                                new_amount = current_amount + nom
-                                sheet.worksheet("Tabungan").update_cell(idx + 2, 3, new_amount)
-                                break
+                        elif tipe_kategori == 'Tabungan':
+                            sheet.worksheet("Transaksi").append_row([
+                                str(tgl), 
+                                kat, 
+                                'Pengeluaran',
+                                nom, 
+                                ket, 
+                                'Tabungan'
+                            ])
+                            
+                            # Update sheet Tabungan
+                            df_tab = pd.DataFrame(sheet.worksheet("Tabungan").get_all_records())
+                            for idx, row in df_tab.iterrows():
+                                if row['Nama_Akun'] == kat:
+                                    current_amount = float(row['Jumlah_Saat_Ini']) if row['Jumlah_Saat_Ini'] else 0
+                                    new_amount = current_amount + nom
+                                    sheet.worksheet("Tabungan").update_cell(idx + 2, 3, new_amount)
+                                    break
+                            
+                            st.success("✅ Transaksi & Akun Tabungan ter-update!")
                         
-                        st.success("✅ Transaksi & Akun Tabungan ter-update!")
-                    
-                    elif tipe_kategori == 'Hutang':
-                        # Masuk sheet Kewajiban
-                        sheet.worksheet("Kewajiban").append_row([pemilik_hutang or kat, nom, str(tgl), "Belum Lunas", "Hutang", pemilik_hutang or ""])
-                        st.success("✅ Hutang tersimpan!")
-                    
-                    elif tipe_kategori == 'Piutang':
-                        # Masuk sheet Kewajiban
-                        sheet.worksheet("Kewajiban").append_row([kat, nom, str(tgl), "Belum Tertagih", "Piutang", pihak_penghutang or ""])
-                        st.success("✅ Piutang tersimpan!")
-                    
-                    st.rerun()
+                        elif tipe_kategori == 'Hutang':
+                            sheet.worksheet("Kewajiban").append_row([
+                                pemilik_hutang, 
+                                nom, 
+                                str(tgl), 
+                                "Belum Lunas", 
+                                "Hutang", 
+                                pemilik_hutang
+                            ])
+                            st.success("✅ Hutang tersimpan!")
+                        
+                        elif tipe_kategori == 'Piutang':
+                            sheet.worksheet("Kewajiban").append_row([
+                                kat, 
+                                nom, 
+                                str(tgl), 
+                                "Belum Tertagih", 
+                                "Piutang", 
+                                pihak_penghutang
+                            ])
+                            st.success("✅ Piutang tersimpan!")
+                        
+                        st.rerun()
 
         # 3. MANAJEMEN TABUNGAN
         elif choice == "🏦 Manajemen Tabungan":
@@ -217,15 +267,35 @@ else:
                 target = st.number_input("Target Jumlah", step=100000, min_value=0)
                 awal = st.number_input("Jumlah Saat Ini", step=10000, min_value=0)
                 
-                if st.form_submit_button("Buat Akun"):
-                    sheet.worksheet("Tabungan").append_row([nama_akun, target, awal, str(datetime.now().date())])
-                    st.success("✅ Akun berhasil dibuat!")
-                    st.rerun()
+                if st.form_submit_button("✅ Buat Akun"):
+                    if not nama_akun:
+                        st.error("❌ Nama akun harus diisi!")
+                    else:
+                        sheet.worksheet("Tabungan").append_row([nama_akun, target, awal, str(datetime.now().date())])
+                        st.success("✅ Akun berhasil dibuat!")
+                        st.rerun()
             
             st.markdown("### Daftar Akun Tabungan")
             df_tab = pd.DataFrame(sheet.worksheet("Tabungan").get_all_records())
             if not df_tab.empty:
-                st.dataframe(df_tab, use_container_width=True)
+                df_tab['Target_Jumlah'] = pd.to_numeric(df_tab['Target_Jumlah'], errors='coerce')
+                df_tab['Jumlah_Saat_Ini'] = pd.to_numeric(df_tab['Jumlah_Saat_Ini'], errors='coerce')
+                
+                for _, row in df_tab.iterrows():
+                    target = float(row['Target_Jumlah']) if row['Target_Jumlah'] else 1
+                    current = float(row['Jumlah_Saat_Ini']) if row['Jumlah_Saat_Ini'] else 0
+                    progress = min(current / target, 1.0)
+                    
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.write(f"**{row['Nama_Akun']}**")
+                        st.progress(progress)
+                        st.write(f"Rp {current:,.0f} / Rp {target:,.0f}")
+                    with col2:
+                        persentase = (current / target * 100) if target > 0 else 0
+                        st.metric("Progress", f"{persentase:.1f}%")
+            else:
+                st.info("ℹ️ Belum ada akun tabungan.")
 
         # 4. MONITORING BUDGET
         elif choice == "💰 Monitoring Budget":
@@ -238,7 +308,7 @@ else:
                 df_trans['Nominal'] = pd.to_numeric(df_trans['Nominal'], errors='coerce')
                 df_budget['Budget'] = pd.to_numeric(df_budget['Budget'], errors='coerce')
                 
-                # Hitung pengeluaran per kategori
+                # Hitung pengeluaran per kategori (hanya Pengeluaran biasa, bukan Tabungan/Hutang/Piutang)
                 pengeluaran = df_trans[df_trans['Tipe_Kategori'] == 'Pengeluaran'].groupby('Kategori')['Nominal'].sum().reset_index()
                 pengeluaran.rename(columns={'Nominal': 'Pengeluaran'}, inplace=True)
                 
@@ -252,6 +322,7 @@ else:
                 
                 st.dataframe(budget_vs_actual, use_container_width=True)
                 
+                # Chart
                 chart_data = budget_vs_actual.set_index('Kategori')[['Budget', 'Pengeluaran']]
                 st.bar_chart(chart_data)
             else:
@@ -264,6 +335,8 @@ else:
             df_kewajiban = pd.DataFrame(sheet.worksheet("Kewajiban").get_all_records())
             
             if not df_kewajiban.empty:
+                df_kewajiban['Nominal'] = pd.to_numeric(df_kewajiban['Nominal'], errors='coerce')
+                
                 # Pisahkan Hutang dan Piutang
                 hutang = df_kewajiban[df_kewajiban['Tipe'] == 'Hutang']
                 piutang = df_kewajiban[df_kewajiban['Tipe'] == 'Piutang']
@@ -271,14 +344,18 @@ else:
                 st.markdown("### 💳 Hutang")
                 if not hutang.empty:
                     st.dataframe(hutang, use_container_width=True)
+                    total_hutang = hutang['Nominal'].sum()
+                    st.metric("Total Hutang", f"Rp {total_hutang:,.0f}")
                 else:
-                    st.info("Tidak ada hutang")
+                    st.info("✅ Tidak ada hutang")
                 
                 st.markdown("### 💰 Piutang")
                 if not piutang.empty:
                     st.dataframe(piutang, use_container_width=True)
+                    total_piutang = piutang['Nominal'].sum()
+                    st.metric("Total Piutang", f"Rp {total_piutang:,.0f}")
                 else:
-                    st.info("Tidak ada piutang")
+                    st.info("✅ Tidak ada piutang")
             else:
                 st.info("ℹ️ Belum ada data kewajiban.")
 
@@ -292,8 +369,8 @@ else:
                 df_rekap['Total_Pemasukan'] = pd.to_numeric(df_rekap['Total_Pemasukan'], errors='coerce')
                 df_rekap['Total_Pengeluaran'] = pd.to_numeric(df_rekap['Total_Pengeluaran'], errors='coerce')
                 df_rekap['Total_Tabungan'] = pd.to_numeric(df_rekap['Total_Tabungan'], errors='coerce')
-                df_rekap['Total_Hutang'] = pd.to_numeric(df_rekap['Total_Hutang'], errors='coerce')
-                df_rekap['Total_Piutang'] = pd.to_numeric(df_rekap['Total_Piutang'], errors='coerce')
+                df_rekap['Total_Hutang'] = pd.to_numeric(df_rekap.get('Total_Hutang', 0), errors='coerce').fillna(0)
+                df_rekap['Total_Piutang'] = pd.to_numeric(df_rekap.get('Total_Piutang', 0), errors='coerce').fillna(0)
                 
                 # Filter Bulan
                 st.markdown("### 🔍 Filter Data")
@@ -310,15 +387,15 @@ else:
                 col4.metric("Saldo", f"Rp {data_bulan['Total_Pemasukan'] - data_bulan['Total_Pengeluaran']:,.0f}")
                 
                 col1, col2 = st.columns(2)
-                col1.metric("Hutang", f"Rp {data_bulan['Total_Hutang']:,.0f}")
-                col2.metric("Piutang", f"Rp {data_bulan['Total_Piutang']:,.0f}")
+                col1.metric("Hutang", f"Rp {data_bulan.get('Total_Hutang', 0):,.0f}")
+                col2.metric("Piutang", f"Rp {data_bulan.get('Total_Piutang', 0):,.0f}")
                 
                 # STATUS
                 st.markdown("### 📊 Status Keuangan")
-                if data_bulan['Status'] == 'Positif':
-                    st.success("✅ STATUS POSITIF")
+                if data_bulan.get('Status') == 'Positif':
+                    st.success("✅ STATUS POSITIF - Pendapatan melebihi pengeluaran")
                 else:
-                    st.error("❌ STATUS NEGATIF")
+                    st.error("❌ STATUS NEGATIF - Pengeluaran melebihi pendapatan")
                 
                 # CHARTS
                 st.markdown("### 📈 Trend Bulanan")
@@ -394,10 +471,10 @@ else:
                         ['Total Pemasukan', f"Rp {data_bulan['Total_Pemasukan']:,.0f}"],
                         ['Total Pengeluaran', f"Rp {data_bulan['Total_Pengeluaran']:,.0f}"],
                         ['Total Tabungan', f"Rp {data_bulan['Total_Tabungan']:,.0f}"],
-                        ['Total Hutang', f"Rp {data_bulan['Total_Hutang']:,.0f}"],
-                        ['Total Piutang', f"Rp {data_bulan['Total_Piutang']:,.0f}"],
+                        ['Total Hutang', f"Rp {data_bulan.get('Total_Hutang', 0):,.0f}"],
+                        ['Total Piutang', f"Rp {data_bulan.get('Total_Piutang', 0):,.0f}"],
                         ['Saldo Akhir', f"Rp {data_bulan['Total_Pemasukan'] - data_bulan['Total_Pengeluaran']:,.0f}"],
-                        ['Status', data_bulan['Status']]
+                        ['Status', data_bulan.get('Status', 'N/A')]
                     ]
                     
                     summary_table = Table(summary_data, colWidths=[3*inch, 2.5*inch])
