@@ -5,10 +5,8 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime
 
-# Setup Halaman
 st.set_page_config(page_title="Finance Tracker Pro", layout="wide")
 
-# Konfigurasi Akses Google Sheets
 SCOPE = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
@@ -32,7 +30,6 @@ def get_google_sheet():
         st.error(f"❌ Error: {str(e)}")
         return None
 
-# Navigasi Sidebar
 st.sidebar.title("Navigasi")
 menu = ["📊 Dashboard", "➕ Input Transaksi", "🏦 Manajemen Tabungan", "💰 Monitoring Budget", "📋 Kewajiban", "📈 Rekap Bulanan"]
 choice = st.sidebar.selectbox("Pilih Menu", menu)
@@ -52,32 +49,36 @@ else:
             df_tab = pd.DataFrame(sheet.worksheet("Tabungan").get_all_records())
             
             if not df_trans.empty:
+                df_trans['Nominal'] = pd.to_numeric(df_trans['Nominal'], errors='coerce')
+                
                 total_masuk = df_trans[df_trans['Tipe'] == 'Pemasukan']['Nominal'].sum()
                 total_keluar = df_trans[df_trans['Tipe'] == 'Pengeluaran']['Nominal'].sum()
                 
                 col1, col2, col3 = st.columns(3)
-                col1.metric("Pemasukan", f"Rp {total_masuk:,}")
-                col2.metric("Pengeluaran", f"Rp {total_keluar:,}")
-                col3.metric("Saldo", f"Rp {total_masuk - total_keluar:,}")
+                col1.metric("Pemasukan", f"Rp {total_masuk:,.0f}")
+                col2.metric("Pengeluaran", f"Rp {total_keluar:,.0f}")
+                col3.metric("Saldo", f"Rp {total_masuk - total_keluar:,.0f}")
                 
                 st.markdown("### Progress Tabungan")
-                for _, row in df_tab.iterrows():
-                    target = float(row['Target_Jumlah']) if row['Target_Jumlah'] else 1
-                    current = float(row['Jumlah_Saat_Ini']) if row['Jumlah_Saat_Ini'] else 0
-                    progress = min(current / target, 1.0)
-                    st.write(f"**{row['Nama_Akun']}**")
-                    st.progress(progress)
-                    st.write(f"Rp {current:,.0f} / Rp {target:,.0f}")
+                if not df_tab.empty:
+                    for _, row in df_tab.iterrows():
+                        target = float(row['Target_Jumlah']) if row['Target_Jumlah'] else 1
+                        current = float(row['Jumlah_Saat_Ini']) if row['Jumlah_Saat_Ini'] else 0
+                        progress = min(current / target, 1.0)
+                        st.write(f"**{row['Nama_Akun']}**")
+                        st.progress(progress)
+                        st.write(f"Rp {current:,.0f} / Rp {target:,.0f}")
             else:
                 st.info("ℹ️ Belum ada data transaksi.")
 
         # 2. Input Transaksi
         elif choice == "➕ Input Transaksi":
+            st.subheader("Tambah Transaksi Baru")
             with st.form("form_transaksi", clear_on_submit=True):
                 tgl = st.date_input("Tanggal")
                 kat = st.text_input("Kategori")
                 tipe = st.selectbox("Tipe", ["Pemasukan", "Pengeluaran"])
-                nom = st.number_input("Nominal", step=1000)
+                nom = st.number_input("Nominal", step=1000, min_value=0)
                 ket = st.text_area("Keterangan")
                 if st.form_submit_button("Simpan"):
                     sheet.worksheet("Transaksi").append_row([str(tgl), kat, tipe, nom, ket])
@@ -89,13 +90,17 @@ else:
             st.subheader("Kelola Akun Tabungan")
             with st.form("form_akun", clear_on_submit=True):
                 nama_akun = st.text_input("Nama Akun")
-                target = st.number_input("Target Jumlah", step=100000)
-                awal = st.number_input("Jumlah Saat Ini", step=10000)
+                target = st.number_input("Target Jumlah", step=100000, min_value=0)
+                awal = st.number_input("Jumlah Saat Ini", step=10000, min_value=0)
                 if st.form_submit_button("Buat Akun"):
                     sheet.worksheet("Tabungan").append_row([nama_akun, target, awal, str(datetime.now().date())])
                     st.success("✅ Akun berhasil dibuat!")
                     st.rerun()
-            st.table(pd.DataFrame(sheet.worksheet("Tabungan").get_all_records()))
+            
+            st.markdown("### Daftar Akun Tabungan")
+            df_tab = pd.DataFrame(sheet.worksheet("Tabungan").get_all_records())
+            if not df_tab.empty:
+                st.dataframe(df_tab, use_container_width=True)
 
         # 4. Monitoring Budget
         elif choice == "💰 Monitoring Budget":
@@ -103,66 +108,78 @@ else:
             df_trans = pd.DataFrame(sheet.worksheet("Transaksi").get_all_records())
             df_budget = pd.DataFrame(sheet.worksheet("Budget").get_all_records())
             
-            pengeluaran = df_trans[df_trans['Tipe'] == 'Pengeluaran'].groupby('Kategori')['Nominal'].sum().reset_index()
-            pengeluaran.rename(columns={'Nominal': 'Pengeluaran'}, inplace=True)
-            
-            budget_vs_actual = pd.merge(df_budget, pengeluaran, on='Kategori', how='left').fillna(0)
-            budget_vs_actual['Selisih'] = budget_vs_actual['Budget'] - budget_vs_actual['Pengeluaran']
-            budget_vs_actual['Status'] = budget_vs_actual.apply(
-                lambda row: '✅ OK' if row['Selisih'] >= 0 else '❌ MELEBIHI', 
-                axis=1
-            )
-            
-            st.dataframe(budget_vs_actual, use_container_width=True)
-            st.bar_chart(budget_vs_actual.set_index('Kategori')[['Budget', 'Pengeluaran']])
+            if not df_trans.empty and not df_budget.empty:
+                df_trans['Nominal'] = pd.to_numeric(df_trans['Nominal'], errors='coerce')
+                df_budget['Budget'] = pd.to_numeric(df_budget['Budget'], errors='coerce')
+                
+                pengeluaran = df_trans[df_trans['Tipe'] == 'Pengeluaran'].groupby('Kategori')['Nominal'].sum().reset_index()
+                pengeluaran.rename(columns={'Nominal': 'Pengeluaran'}, inplace=True)
+                
+                budget_vs_actual = pd.merge(df_budget, pengeluaran, on='Kategori', how='left').fillna(0)
+                budget_vs_actual['Selisih'] = budget_vs_actual['Budget'] - budget_vs_actual['Pengeluaran']
+                budget_vs_actual['Status'] = budget_vs_actual.apply(
+                    lambda row: '✅ OK' if row['Selisih'] >= 0 else '❌ MELEBIHI', 
+                    axis=1
+                )
+                
+                st.dataframe(budget_vs_actual, use_container_width=True)
+                chart_data = budget_vs_actual.set_index('Kategori')[['Budget', 'Pengeluaran']]
+                st.bar_chart(chart_data)
+            else:
+                st.info("ℹ️ Data Budget atau Transaksi belum tersedia.")
 
         # 5. Kewajiban
         elif choice == "📋 Kewajiban":
             st.subheader("Daftar Kewajiban")
-            st.dataframe(pd.DataFrame(sheet.worksheet("Kewajiban").get_all_records()), use_container_width=True)
+            df_kewajiban = pd.DataFrame(sheet.worksheet("Kewajiban").get_all_records())
+            if not df_kewajiban.empty:
+                st.dataframe(df_kewajiban, use_container_width=True)
 
         # 6. Rekap Bulanan
         elif choice == "📈 Rekap Bulanan":
             st.subheader("📈 Rekap Keuangan Bulanan")
-            df_rekap = pd.DataFrame(sheet.worksheet("Rekap Bulanan").get_all_records())
+            df_rekap = pd.DataFrame(sheet.worksheet("Rekap_Bulanan").get_all_records())
             
             if not df_rekap.empty:
+                df_rekap['Total_Pemasukan'] = pd.to_numeric(df_rekap['Total_Pemasukan'], errors='coerce')
+                df_rekap['Total_Pengeluaran'] = pd.to_numeric(df_rekap['Total_Pengeluaran'], errors='coerce')
+                df_rekap['Total_Tabungan'] = pd.to_numeric(df_rekap['Total_Tabungan'], errors='coerce')
+                
                 # Filter Bulan
                 st.markdown("### 🔍 Filter Data")
-                bulan_pilih = st.selectbox("Pilih Bulan", df_rekap['Bulan_Tahun'], key='bulan_rekap')
+                bulan_pilih = st.selectbox("Pilih Bulan", df_rekap['Bulan_Tahun'].values)
                 
-                # Ambil data bulan yang dipilih
                 data_bulan = df_rekap[df_rekap['Bulan_Tahun'] == bulan_pilih].iloc[0]
                 
-                # SECTION 1: METRICS SUMMARY
+                # METRICS SUMMARY
                 st.markdown("### 💹 Ringkasan Bulanan")
                 col1, col2, col3, col4 = st.columns(4)
                 
-                col1.metric("Total Pemasukan", f"Rp {data_bulan['Total_Pemasukan']:,.0f}", delta="✅ Masuk")
-                col2.metric("Total Pengeluaran", f"Rp {data_bulan['Total_Pengeluaran']:,.0f}", delta="❌ Keluar")
-                col3.metric("Total Tabungan", f"Rp {data_bulan['Total_Tabungan']:,.0f}", delta="💰 Ditabung")
-                col4.metric("Saldo Akhir", f"Rp {data_bulan['Total_Pemasukan'] - data_bulan['Total_Pengeluaran']:,.0f}", delta=data_bulan['Status'])
+                col1.metric("Total Pemasukan", f"Rp {data_bulan['Total_Pemasukan']:,.0f}")
+                col2.metric("Total Pengeluaran", f"Rp {data_bulan['Total_Pengeluaran']:,.0f}")
+                col3.metric("Total Tabungan", f"Rp {data_bulan['Total_Tabungan']:,.0f}")
+                col4.metric("Saldo Akhir", f"Rp {data_bulan['Total_Pemasukan'] - data_bulan['Total_Pengeluaran']:,.0f}")
                 
-                # SECTION 2: STATUS BADGE
+                # STATUS BADGE
                 st.markdown("### 📊 Status Keuangan")
                 if data_bulan['Status'] == 'Positif':
-                    st.success("✅ STATUS POSITIF - Pengeluaran lebih kecil dari pemasukan")
+                    st.success("✅ STATUS POSITIF - Pendapatan melebihi pengeluaran")
                 else:
-                    st.error("❌ STATUS NEGATIF - Pengeluaran melebihi pemasukan")
+                    st.error("❌ STATUS NEGATIF - Pengeluaran melebihi pendapatan")
                 
-                # SECTION 3: TREND CHART
+                # TREND CHART
                 st.markdown("### 📈 Trend Pemasukan vs Pengeluaran")
                 chart_data = df_rekap[['Bulan_Tahun', 'Total_Pemasukan', 'Total_Pengeluaran']].set_index('Bulan_Tahun')
-                st.line_chart(chart_data, use_container_width=True)
+                st.line_chart(chart_data)
                 
-                # SECTION 4: SIDE BY SIDE CHARTS
+                # SIDE BY SIDE CHARTS
                 st.markdown("### 💰 Analisis Detail")
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.subheader("Tabungan per Bulan")
-                    tabungan_chart = df_rekap[['Bulan_Tahun', 'Total_Tabungan']].set_index('Bulan_Tahun')
-                    st.bar_chart(tabungan_chart, use_container_width=True)
+                    st.subheader("Pengeluaran per Bulan")
+                    pengeluaran_chart = df_rekap[['Bulan_Tahun', 'Total_Pengeluaran']].set_index('Bulan_Tahun')
+                    st.bar_chart(pengeluaran_chart)
                 
                 with col2:
                     st.subheader("Komposisi Keuangan")
@@ -174,14 +191,14 @@ else:
                             data_bulan['Total_Tabungan']
                         ]
                     })
-                    fig_pie = px.pie(pie_data, names='Kategori', values='Nominal', hole=0.3)
+                    fig_pie = px.pie(pie_data, names='Kategori', values='Nominal')
                     st.plotly_chart(fig_pie, use_container_width=True)
                 
-                # SECTION 5: DETAIL TABLE
+                # DETAIL TABLE
                 st.markdown("### 📋 Detail Rekap Bulanan")
                 st.dataframe(df_rekap, use_container_width=True)
                 
-                # SECTION 6: PDF DOWNLOAD
+                # PDF DOWNLOAD
                 st.markdown("### 📥 Export Laporan")
                 if st.button("📄 Generate Laporan Keuangan PDF", key="btn_pdf"):
                     from reportlab.lib.pagesizes import A4
@@ -284,10 +301,8 @@ else:
                         mime="application/pdf"
                     )
                     st.success("✅ PDF Laporan berhasil dibuat!")
-            
             else:
                 st.info("ℹ️ Belum ada data rekap bulanan.")
 
     except Exception as e:
         st.error(f"❌ Error: {str(e)}")
-        st.info("Tip: Pastikan semua sheet sudah ada di spreadsheet Anda.")
