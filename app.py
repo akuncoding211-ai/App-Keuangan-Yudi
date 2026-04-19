@@ -23,7 +23,7 @@ def connect_sheet():
         scopes=SCOPE
     )
     client = gspread.authorize(creds)
-    return client.open_by_key("YOUR_SPREADSHEET_ID")  # GANTI
+    return client.open_by_key("1Ig-coNVWo1F-1JsCTalmnp0qLcLiR28-D5yN4fxkduk")
 
 sheet = connect_sheet()
 
